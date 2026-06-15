@@ -235,6 +235,27 @@ const Avatar = ({ name, sex, size = 48, tone, photo }) => {
   );
 };
 
+/* วงแหวนค่าเหนื่อยรอบไอคอน/โปรไฟล์ — stam=0..1 · ring เป็น conic-gradient รอบนอก */
+const StaminaRing = ({ children, size, stam }) => {
+  if (stam == null) return children;
+  const p = Math.max(0, Math.min(1, stam));
+  const col = p < 0.2 ? "#D06262" : p < 0.4 ? "#E8A23D" : "#58C9A0";
+  const ringW = Math.max(3, Math.round(size * 0.085));
+  const deg = p * 360;
+  const box = size + ringW * 2 + 4;
+  return (
+    <div style={{ position: "relative", width: box, height: box, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{
+        position: "absolute", inset: 0, borderRadius: "50%",
+        background: `conic-gradient(${col} ${deg}deg, rgba(0,0,0,0.10) ${deg}deg 360deg)`,
+        WebkitMask: `radial-gradient(farthest-side, transparent calc(100% - ${ringW}px), #000 calc(100% - ${ringW}px))`,
+        mask: `radial-gradient(farthest-side, transparent calc(100% - ${ringW}px), #000 calc(100% - ${ringW}px))`,
+      }} />
+      <div style={{ position: "relative", lineHeight: 0 }}>{children}</div>
+    </div>
+  );
+};
+
 const Cloth = ({ n, size = 34 }) => {
   const [bg, fg] = CLOTH[n] || [T.soft, T.muted];
   return (
@@ -318,6 +339,8 @@ export default function App() {
   const [sel, setSel] = useState(null);
   const [searchOpen, setSearchOpen] = useState(true);
   const [openRace, setOpenRace] = useState(null);
+  const [sortKey, setSortKey] = useState("default");
+  const [sortDir, setSortDir] = useState("desc");
 
   const races = DB.races;
   const registry = DB.registry;
@@ -392,6 +415,27 @@ export default function App() {
     (cls === "all" || h.runs.some((r) => r.cls && (cls === "Thoroughbred" ? r.cls.startsWith("Thoroughbred") : r.cls.startsWith(cls)))) &&
     (dist === "all" || h.runs.some((r) => r.dist === Number(dist)))
   );
+  const dir = sortDir === "asc" ? 1 : -1;
+  const cmpStr = (a, b) => String(a || "").localeCompare(String(b || ""), "th");
+  const fStudentsSorted = useMemo(() => {
+    if (sortKey === "default") return fStudents;
+    const arr = [...fStudents];
+    const keyFn = {
+      name: (h) => h.th || h.name || "",
+      win: (h) => h.winP,
+      podium: (h) => h.podiumP,
+      speed: (h) => h.topSpeed || 0,
+      starts: (h) => h.starts,
+      birthday: (h) => h.bday || "",
+    }[sortKey];
+    if (!keyFn) return fStudents; /* คีย์เฉพาะหน้าผลการแข่ง (date/distance) ไม่ใช้กับนักเรียน */
+    arr.sort((a, b) => {
+      const va = keyFn(a), vb = keyFn(b);
+      const c = typeof va === "string" ? cmpStr(va, vb) : (va - vb);
+      return c * dir;
+    });
+    return arr;
+  }, [fStudents, sortKey, sortDir]);
   const fRaces = races.filter((r) =>
     match(r, ["name", "th", "reg", "jockey", "trainer", "stable", "program", "sire", "dam"]) &&
     (cls === "all" || (r.cls && (cls === "Thoroughbred" ? r.cls.startsWith("Thoroughbred") : r.cls.startsWith(cls)))) && (dist === "all" || r.dist === Number(dist))
@@ -404,9 +448,24 @@ export default function App() {
       if (!g.has(k)) g.set(k, { date: r.date, race: r.race, program: r.program, cls: r.cls, dist: r.dist, post: r.post, rows: [] });
       g.get(k).rows.push(r);
     });
-    return [...g.values()].sort((a, b) => (b.date || "").localeCompare(a.date || "") || (a.race || 0) - (b.race || 0))
-      .map((g2) => ({ ...g2, rows: g2.rows.sort((a, b) => (typeof a.place === "number" ? a.place : 99) - (typeof b.place === "number" ? b.place : 99)) }));
-  }, [fRaces]);
+    const list = [...g.values()].map((g2) => ({
+      ...g2,
+      rows: [...g2.rows].sort((a, b) => (typeof a.place === "number" ? a.place : 99) - (typeof b.place === "number" ? b.place : 99)),
+    }));
+    const d2 = sortDir === "asc" ? 1 : -1;
+    const cmpS = (a, b) => String(a == null ? "" : a).localeCompare(String(b == null ? "" : b));
+    const byDateDefault = (a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (Number(a.race) || 0) - (Number(b.race) || 0);
+    if (sortKey === "name") {
+      list.sort((a, b) => cmpS(a.program, b.program) * d2);
+    } else if (sortKey === "distance") {
+      list.sort((a, b) => ((Number(a.dist) || 0) - (Number(b.dist) || 0)) * d2);
+    } else if (sortKey === "date") {
+      list.sort((a, b) => byDateDefault(a, b) * (sortDir === "asc" ? -1 : 1));
+    } else {
+      list.sort(byDateDefault);
+    }
+    return list;
+  }, [fRaces, sortKey, sortDir]);
 
   /* overall highlight stats */
   const hall = useMemo(() => {
@@ -469,7 +528,7 @@ export default function App() {
       {/* menu dropdown + collapsible search */}
       <div style={{ position: "sticky", top: 0, zIndex: 5, background: "rgba(241,238,250,0.92)", backdropFilter: "blur(10px)", borderBottom: `1px solid ${T.line}` }}>
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "10px 14px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <select value={tab} onChange={(e) => setTab(e.target.value)} style={{
+          <select value={tab} onChange={(e) => { setTab(e.target.value); setSortKey("default"); }} style={{
             border: "none", borderRadius: 10, padding: "10px 14px", cursor: "pointer",
             background: `linear-gradient(135deg, ${T.sky}, ${T.deep})`, color: "#fff",
             fontSize: 14, fontWeight: 700, fontFamily: "'Prompt',sans-serif", outline: "none",
@@ -504,6 +563,31 @@ export default function App() {
               <option value="all">Range</option>
               {dists.map((d) => <option key={d} value={d}>{d.toLocaleString()} ม.</option>)}
             </select>
+            {(tab === "students" || tab === "races") && (
+              <>
+                <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} style={{ ...inputStyle, padding: "10px 12px" }}>
+                  <option value="default">Sort by</option>
+                  <option value="name">{tab === "races" ? "ชื่อรายการ (A–Z)" : "ชื่อ (A–Z)"}</option>
+                  {tab === "students" && <>
+                    <option value="win">อัตราชนะ</option>
+                    <option value="podium">อัตราเพลส</option>
+                    <option value="speed">ความเร็วสูงสุด</option>
+                    <option value="starts">จำนวนลงสนาม</option>
+                    <option value="birthday">วันเกิด</option>
+                  </>}
+                  {tab === "races" && <>
+                    <option value="date">วันที่แข่ง</option>
+                    <option value="distance">ระยะทาง</option>
+                  </>}
+                </select>
+                {sortKey !== "default" && (
+                  <button onClick={() => setSortDir((d) => d === "asc" ? "desc" : "asc")} title="สลับ Ascending / Descending" style={{
+                    ...inputStyle, padding: "10px 14px", cursor: "pointer", fontWeight: 700,
+                    color: T.deep, display: "flex", alignItems: "center", gap: 5,
+                  }}>{sortDir === "asc" ? "↑ Asc" : "↓ Desc"}</button>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -515,7 +599,7 @@ export default function App() {
           <>
             {fStudents.length === 0 ? <Empty q={q} /> :
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(162px, 1fr))", gap: 12 }}>
-            {fStudents.map((h) => (
+            {fStudentsSorted.map((h) => (
               <button key={h.reg || h.th} className="card" onClick={() => setSel(h)} style={{
                 textAlign: "center", background: T.card, border: "none", borderRadius: 18,
                 padding: 0, color: T.ink, fontFamily: "'Sarabun',sans-serif", overflow: "hidden",
@@ -894,6 +978,7 @@ const Simulator = ({ students, openProfile }) => {
   const [env, setEnv] = useState(null); // { weather, cond, time, temp }
   const [count, setCount] = useState(3);
   const [log, setLog] = useState([]); // commentary log (ล่าสุดอยู่บน)
+  const [followCam, setFollowCam] = useState(true);
   const simRef = useRef(null);
   const speedRef = useRef(simSpeed);
   speedRef.current = simSpeed;
@@ -901,9 +986,13 @@ const Simulator = ({ students, openProfile }) => {
 
   const keyOf = (h) => h.reg || h.th;
   const nameOf = (r) => r.h.th || r.h.name;
+  /* เลือกเล่นได้เฉพาะตัวที่มีภาพโปรไฟล์ · ตัวไม่มีภาพใช้เป็นตัวสุ่มเติมให้ครบ 16 */
+  const playable = useMemo(() => students.filter((h) => photoOf(h)), [students]);
+  const noPhoto = useMemo(() => students.filter((h) => !photoOf(h)), [students]);
   const toggle = (key) => setPicked((p) => p.includes(key) ? p.filter((k) => k !== key) : (p.length < 16 ? [...p, key] : p));
+  /* random all = สุ่มเฉพาะตัวมีภาพทั้งหมด (สูงสุด 16) */
   const randomPick = () => {
-    const pool = [...students];
+    const pool = [...playable];
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
     setPicked(pool.slice(0, 16).map(keyOf));
   };
@@ -924,7 +1013,13 @@ const Simulator = ({ students, openProfile }) => {
     const temp = w === "rain" ? "cool" : (tPick.h < 16 ? "hot" : "cool");
     setEnv({ weather: w, cond: condPick, time: tPick, temp });
 
-    const list = students.filter((h) => picked.includes(keyOf(h)));
+    let list = students.filter((h) => picked.includes(keyOf(h)));
+    /* ถ้าเลือกไม่ครบ 16 → สุ่มตัวที่ "ไม่มีภาพ" มาเติมให้ครบ */
+    if (list.length < 16) {
+      const fillerPool = noPhoto.filter((h) => !picked.includes(keyOf(h)));
+      for (let i = fillerPool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [fillerPool[i], fillerPool[j]] = [fillerPool[j], fillerPool[i]]; }
+      list = [...list, ...fillerPool.slice(0, 16 - list.length)];
+    }
     /* เบอร์ = อันดับคะแนนความสามารถภาพรวม (เก่งสุด = เบอร์ 1) */
     const score = (h) => (h.topSpeed || h.avgSpeed || 54) * 1.5 + (h.winP || 0) * 0.6 + (h.podiumP || 0) * 0.3 + (h.wins || 0) * 2;
     const byScore = [...list].sort((a, b) => score(b) - score(a));
@@ -988,8 +1083,37 @@ const Simulator = ({ students, openProfile }) => {
       const pressT = (hasBlinkers || sdVal < 1.8) ? "clutch" : sdVal > 3 ? "panic" : "enjoy";
       const skillT = styleMain === "ฝีเท้าปลาย" ? "surge" : styleMain === "ฝีเท้าต้น" ? "drain" : "even";
       const mental = { rival: rivalT, press: pressT, skill: skillT };
+      /* ===== นโยบายการออกแรง (effort) — ตัดสินใจไม่เหมือนกัน =====
+         allout: วิ่งใส่สุดกำลัง ยอมเสี่ยงเจ็บ/สมาธิเพื่อความเร็ว
+         saver: เซฟแรง รักษาสมาธิและกันเจ็บ แลกกับสปีดน้อยลงเล็กน้อย
+         balanced: ตามจังหวะ */
+      const effort = mental.rival === "fight" || styleMain === "ฝีเท้าต้น" ? "allout"
+        : (hasBlinkers || mental.press === "clutch" || mental.rival === "fold") ? "saver"
+        : "balanced";
       /* จุดใช้สกิลเร่งบนทางตรงสุดท้าย (5 ครั้งตามกติกา · ทางตรงสุดท้ายยาว 150 ม.) */
-      const boostMarks = [250, 200, 150, 100, 50].map((m) => dist - m - Math.random() * 12);
+      /* ระบบสกิล 3 โซน: 50 ม.แรกห้ามใช้ · กลางใช้ได้ 5 ครั้งมีคูลดาวน์ · 400 ม.สุดท้ายไม่จำกัด
+         skillSense = ความถี่ที่อยากใช้สกิลในโซนกลาง (ยิ่งสมาธิดี/สายปลายยิ่งจัดจังหวะเก่ง) */
+      const skillSense = 0.4 + (focus / 100) * 0.4 + (styleMain === "ฝีเท้าปลาย" ? 0.15 : 0);
+      /* ===== ระบบความเหนื่อย (Stamina) =====
+         capacity ฐาน 100 ปรับตาม: ระยะที่เคยวิ่ง (วิ่งระยะไกลบ่อย = อึด) · สไตล์ (ฝีเท้าต้นหมดไว ปลายอึด)
+         · mental (clutch ทนกดดัน / panic เปลืองแรง) · blinkers (โฟกัสดี ประหยัดแรง) · อายุ · สนาม/อากาศ */
+      const raced = (h.runs || []).map((rr) => rr.dist).filter(Boolean);
+      const avgRaced = raced.length ? raced.reduce((a, b) => a + b, 0) / raced.length : 1200;
+      let stamCap = 100;
+      stamCap += Math.min(18, (avgRaced - 1200) / 22);        /* เคยวิ่งไกล = อึดขึ้น */
+      if (styleMain === "ฝีเท้าปลาย") stamCap += 10;
+      else if (styleMain === "ไล่ตาม") stamCap += 4;
+      else if (styleMain === "ฝีเท้าต้น") stamCap -= 8;
+      if (mental.press === "clutch") stamCap += 6;
+      else if (mental.press === "panic") stamCap -= 6;
+      if (hasBlinkers) stamCap += 5;
+      const ageY = h.bday ? (new Date("2026-06-10") - new Date(h.bday)) / 3.156e10 : 5;
+      if (ageY >= 7) stamCap -= 5; else if (ageY <= 3) stamCap -= 3; /* แก่/อ่อนเยาว์ อึดน้อยกว่าวัยฉกรรจ์ */
+      if (condPick === "soft") stamCap -= 4; else if (condPick === "heavy") stamCap -= 9; /* สนามหนักเปลืองแรง */
+      if (temp === "hot") stamCap -= 5;
+      stamCap = Math.max(72, Math.min(125, Math.round(stamCap)));
+      /* อัตราเผาผลาญต่อระยะ — ตั้งให้พอดีระยะที่ลงแข่ง: ระยะยาวเบิร์นช้าลงเล็กน้อยเพื่อให้ไปถึงเส้น */
+      const burnPerM = (stamCap / dist) * 0.82;
       const gate = gates[i];
       /* กลยุทธ์ตามซอง: ซองใน=ชิดราง · ซองนอก=ตัดเข้าใน (ฝีเท้าต้น/ไล่ตาม) หรืออ้อมนอก (ฝีเท้าปลาย/สมดุล) */
       const third = Math.ceil(list.length / 3);
@@ -1001,9 +1125,11 @@ const Simulator = ({ students, openProfile }) => {
         base, luck: 0.985 + Math.random() * 0.03, noise: 0,
         progress: 0, prevProgress: 0, v: 0,
         off: 2 + (gate - 1) * gateGap, targetOff: 4, blocked: false,
-        charges: 5, boostMarks, boostUntil: -1,
+        midCharges: 5, lastSkillAt: -99, boostUntil: -1, skillSense,
         finish: null, overrun: 0, decel: 0.75 + Math.random() * 2.1, /* วิ่งเลยเส้นชัย ~50–200 ม. แล้วค่อยชะลอ */
         curveApt, straightApt, focus, mental, stress: 0, momentum: 0, wasBoost: false, drainUntil: -1,
+        stamCap, stamina: stamCap, burnPerM, gassed: false, effort, fatigInjAt: null,
+        heavyField: condPick === "heavy", injHist: (h.runs || []).some((rr) => rr.injury === "yes"),
         acc, hurt: false, out: false,
         style: styleMain,
       };
@@ -1045,6 +1171,7 @@ const Simulator = ({ students, openProfile }) => {
       S.t += dt;
       let allDone = true;
       const order = [...S.rs].filter((r) => !r.out).sort((a, b) => b.progress - a.progress);
+      const r0base = (S.rs[0] && S.rs[0].base) || 16;
 
       S.rs.forEach((r) => {
         if (r.out) return;
@@ -1064,16 +1191,7 @@ const Simulator = ({ students, openProfile }) => {
           if (r.acc.severe) { r.out = true; pushMsg(S, `${nm} เจ็บขาระหว่างทาง ไม่ไหว ขอถอนตัว 😢`); return; }
           r.hurt = true; pushMsg(S, `${nm} เจ็บขาระหว่างทาง แต่ฝืนวิ่งต่อ! 🩹`);
         }
-        /* สกิลเร่งบนทางตรงสุดท้าย (สูงสุด 5 ครั้ง) */
-        if (remaining <= HOME_M + 4 && r.charges > 0 && r.boostMarks.length && r.progress >= r.boostMarks[0]) {
-          r.boostMarks.shift();
-          r.charges--;
-          r.boostUntil = S.t + 0.9;
-        }
-        const boosting = S.t < r.boostUntil;
-        r.boosting = boosting;
-        /* ความเร็ว */
-        /* [ระบบ Mental] ความเครียดสะสมจาก โดนบัง/เจ็บ/รั้งท้าย แล้วตอบสนองตามนิสัย */
+        /* ===== สถานะจิตใจ (คำนวณก่อนตัดสินใจใช้สกิล) ===== */
         const idxRank = order.indexOf(r);
         const lastPlace = order.length > 2 && idxRank === order.length - 1;
         const stressed = r.blocked || r.hurt || lastPlace;
@@ -1082,7 +1200,76 @@ const Simulator = ({ students, openProfile }) => {
         if (r.mental.press === "clutch") effFocus += 18 * r.stress;
         else if (r.mental.press === "panic") effFocus -= 24 * r.stress;
         else effFocus += 6 * r.stress;
-        effFocus = Math.max(10, Math.min(99, effFocus));
+        /* เหนื่อยมาก = สมาธิตก (ยิ่งต่ำกว่า 35% ยิ่งหนัก · saver โดนน้อยกว่า allout) */
+        const sp0 = r.stamPct != null ? r.stamPct : 1;
+        if (sp0 < 0.35) {
+          const fatFocusPen = (0.35 - sp0) / 0.35 * (r.effort === "saver" ? 16 : r.effort === "allout" ? 34 : 25);
+          effFocus -= fatFocusPen;
+        }
+        effFocus = Math.max(8, Math.min(99, effFocus));
+
+        /* ===== ระบบสกิล 3 โซน · ตัดสินใจรายคนตามนิสัย/สถานะ/mental → ใช้ไม่พร้อมกัน ===== */
+        const inHome = remaining <= 400;            /* 400 ม.สุดท้าย: ไม่จำกัด ต้องวิ่งตรง */
+        const inLockout = r.progress < 50;          /* 50 ม.แรก: ห้ามใช้ */
+        const inMid = !inLockout && !inHome;        /* โซนกลาง: 5 ครั้ง มีคูลดาวน์ */
+        /* คูลดาวน์รายคน: สมาธิดี/สายปลายฟื้นไว · panic ตอนเครียดยืดออก */
+        const baseCD = 1.6 - (effFocus / 100) * 0.6 - (r.style === "ฝีเท้าปลาย" ? 0.15 : 0);
+        const COOLDOWN = Math.max(0.7, baseCD + (r.mental.press === "panic" ? r.stress * 0.8 : 0));
+        const onCD = S.t - r.lastSkillAt < COOLDOWN;
+        let useSkill = false;
+        if (S.t >= r.boostUntil && !onCD) {
+          /* คนใกล้สุดในระยะ 7 ม. — มีคู่แข่งจ่อทั้งหน้า/หลัง = แรงกระตุ้นให้เร่ง */
+          const near = S.rs.find((o) => o !== r && !o.out && o.finish == null &&
+            Math.abs(o.progress - r.progress) < 7);
+          if (inHome) {
+            /* ทางตรงสุดท้าย: ทุกคนเร่งได้ แต่ "ตัดสินใจเปิดสกิล" ช้า-เร็วต่างกัน
+               สายปลาย/ใจสู้/clutch จะอั้นไว้แล้วเปิดเกมช้ากว่า (เก็บไว้เสียบ) · ตัวใจร้อนเปิดทันที */
+            let openAt = 400; /* เปิดสกิลเมื่อเหลือกี่เมตร */
+            if (r.style === "ฝีเท้าปลาย") openAt -= 110;
+            else if (r.style === "ฝีเท้าต้น") openAt += 0;
+            if (r.mental.rival === "fight") openAt -= 50;
+            else if (r.mental.rival === "fold") openAt += 40;
+            if (r.mental.press === "clutch") openAt -= 40;
+            openAt -= (effFocus - 55) * 0.8; /* สมาธิสูงจับจังหวะได้แม่น เปิดตรงเวลา */
+            openAt += (r.no - 1) * 6;          /* เบอร์ดี (เก่ง) กล้าเปิดเร็วกว่า */
+            if (r.effort === "allout") openAt += 60;     /* ใส่สุด: เปิดเร็ว */
+            else if (r.effort === "saver") openAt -= 50;  /* เซฟ: เปิดช้า เก็บแรง */
+            const lowStam = (r.stamPct != null ? r.stamPct : 1) < 0.22;
+            const wantHome = (remaining <= openAt || near) && !(r.effort === "saver" && lowStam && !near);
+            if (wantHome) useSkill = true;
+          } else if (inMid && r.midCharges > 0) {
+            /* โซนกลาง: โอกาสตัดสินใจต่อเฟรมขึ้นกับนิสัย+สถานะ — แต่ละคนจึงกดไม่พร้อมกัน */
+            let urge = r.skillSense * 0.9;                         /* นิสัยพื้นฐาน */
+            if (r.effort === "allout") urge *= 1.5;               /* ใส่สุด: กดสกิลถี่ */
+            else if (r.effort === "saver") urge *= 0.5;           /* เซฟ: กดเท่าที่จำเป็น */
+            if ((r.stamPct != null ? r.stamPct : 1) < 0.3 && r.effort !== "allout") urge *= 0.4; /* แรงน้อย คนไม่บ้าพลังจะยั้งมือ */
+            if (near) urge += 0.6;                                 /* โดนจ่อ = อยากเร่งหนี/แซง */
+            if (r.hurt) urge += 0.5;                               /* เจ็บ = พยายามดันตัวเอง */
+            if (lastPlace) urge += r.mental.press === "panic" ? -0.3 : 0.4; /* รั้งท้าย: บางคนฮึด บางคนหมดไฟ */
+            if (r.mental.rival === "fight" && near) urge += 0.4;   /* เจอคู่แข่งยิ่งสู้ */
+            if (r.mental.rival === "fold" && near) urge -= 0.3;    /* ถอดใจ */
+            urge *= 0.6 + 0.8 * (effFocus / 100);                 /* สมาธิคุมการตัดสินใจ */
+            /* เก็บกระสุนไว้ท้าย ๆ: สายปลายไม่ผลาญสกิลกลางสนาม */
+            if (r.style === "ฝีเท้าปลาย") urge *= 0.55;
+            if (Math.random() < Math.max(0, urge) * dt * 1.5) useSkill = true;
+          }
+        }
+        if (useSkill) {
+          r.boostUntil = S.t + (inHome ? 0.8 : 0.9);
+          r.lastSkillAt = S.t;
+          if (inMid) r.midCharges--;
+          r.skillZone = inHome ? "home" : "mid";
+          /* พากย์จังหวะเปิดสกิลเด่น ๆ — ผู้นำเปิดสปรินต์ / คนเสียบจากท้าย (เว้นจังหวะกันสแปม) */
+          if (S.t - (S.lastSkillCall || -9) > 1.4) {
+            if (inHome && idxRank === 0 && !S.flags.openSprint) { S.flags.openSprint = true; S.lastSkillCall = S.t; pushMsg(S, `${nm} เปิดสกิลสปรินต์นำขบวน! ⚡`); }
+            else if (inHome && idxRank > 2 && remaining < 220) { S.lastSkillCall = S.t; pushMsg(S, `${nm} งัดสกิลเสียบจากด้านหลัง! 🔥`); }
+            else if (inMid && r.midCharges === 0) { S.lastSkillCall = S.t; pushMsg(S, `${nm} ใช้สกิลโซนกลางหมดเกลี้ยงแล้ว`); }
+          }
+        }
+        const boosting = S.t < r.boostUntil;
+        r.boosting = boosting;
+        r.mustStraight = inHome;
+        /* ความเร็ว */
         /* สมาธิ(สุทธิ)ต่ำ = ฟอร์มแกว่งกว่า */
         const noiseAmp = 0.012 + (1 - effFocus / 100) * 0.014;
         r.noise += (Math.random() - 0.5) * noiseAmp;
@@ -1122,10 +1309,14 @@ const Simulator = ({ students, openProfile }) => {
           o.progress > r.progress && o.progress - r.progress < 12 && Math.abs(o.off - r.off) < 8);
         r.blocked = false;
         /* [ระบบลับ 2] สมาธิสูง = ตัดสินใจหาช่องได้บ่อยและแม่นกว่า สมาธิหลุด = คิดไม่ออก ติดอยู่หลังคน */
-        const decide = Math.random() < 0.25 + 0.72 * (effFocus / 100);
-        if (blocker && v > blocker.v) {
+        /* 400 ม.สุดท้ายต้องวิ่งตรง ไม่ตัดเลน */
+        const decide = !r.mustStraight && Math.random() < 0.25 + 0.72 * (effFocus / 100);
+        if (r.mustStraight) {
+          r.targetOff = r.off; /* ตรึงเลนปัจจุบัน */
+        } else if (blocker && v > blocker.v) {
           r.blocked = true;
-          v = Math.min(v, blocker.v * 0.99);
+          /* โดนบัง: ลดความเร็วตามคันหน้า แต่ในทางตรงสุดท้ายยอมให้เบียดผ่านได้บ้าง กันรถติดค้าง */
+          v = Math.min(v, blocker.v * (r.mustStraight ? 0.985 : 0.95) + (r.mustStraight ? 0.3 : 0));
           if (decide) {
             /* หาไลน์แซง: สายอ้อมนอกลองออกนอกก่อน นอกนั้นเข้าในก่อน */
             const inn = Math.max(minOff, r.off - 11), out2 = Math.min(OFF_MAX, r.off + 11);
@@ -1143,6 +1334,39 @@ const Simulator = ({ students, openProfile }) => {
         const shift = Math.sign(dOff) * Math.min(Math.abs(dOff), shiftRate * dt);
         r.off = Math.max(0, Math.min(OFF_MAX, r.off + shift));
         r.movingIn = dOff < -2; r.movingOut = dOff > 2;
+
+        /* ===== เผาผลาญความเหนื่อย ===== */
+        const dist_m = v * dt;                          /* เมตรที่วิ่งเฟรมนี้ */
+        let burn = r.burnPerM * dist_m;
+        if (boosting) burn *= 2.4;                      /* ใช้สกิลเปลืองแรงมาก */
+        if (r.hurt) burn *= 1.3;                        /* เจ็บ = เหนื่อยเร็ว */
+        burn *= 1 + 0.5 * r.stress;                     /* เครียดเผาแรงมากขึ้น */
+        if (r.mental.press === "panic") burn *= 1 + 0.4 * r.stress;
+        r.stamina = Math.max(0, r.stamina - burn);
+        const stamPct = r.stamina / r.stamCap;
+        /* แรงตกเมื่อความเหนื่อยลงต่ำ — เริ่มรู้สึกที่ <35% หมดแรงจริงที่ 0% */
+        if (stamPct < 0.35) {
+          const fade = (0.35 - stamPct) / 0.35;         /* 0→1 ยิ่งเหนื่อยยิ่งช้า */
+          v *= 1 - 0.22 * fade;                         /* สูงสุด -22% ตอนหมดแรง */
+          if (!r.gassed && stamPct < 0.12) { r.gassed = true; pushMsg(S, `${nm} เริ่มหมดแรง ฝีเท้าตก! 😮‍💨`); }
+          /* ===== ยิ่งเหนื่อยยิ่งเสี่ยงเจ็บ ===== ออกแรงเกินตัวตอนหมดแรง = บาดเจ็บกล้ามเนื้อ
+             allout เสี่ยงสูงกว่า saver มาก · สนามหนัก/บูสต์ขณะหมดแรงยิ่งซ้ำเติม */
+          if (!r.hurt && !r.out && stamPct < 0.28) {
+            let pHurt = (0.28 - stamPct) * (r.effort === "allout" ? 0.075 : r.effort === "saver" ? 0.018 : 0.040) * dt;
+            if (boosting) pHurt *= 2.2;                  /* ฝืนใช้สกิลตอนหมดแรง = อันตราย */
+            if (r.heavyField) pHurt *= 1.4;
+            if (r.injHist) pHurt *= 1.3; /* ประวัติเจ็บ */
+            if (Math.random() < pHurt) {
+              r.hurt = true; r.fatigInjAt = stamPct;
+              pushMsg(S, `${nm} ฝืนจนกล้ามเนื้อล้า เจ็บขากะทันหัน! 🩹`);
+            }
+          }
+        } else if (r.gassed && stamPct > 0.4) r.gassed = false;
+        r.stamPct = stamPct;
+
+        /* กันค่าเพี้ยน/หยุดนิ่ง: พื้นความเร็วขั้นต่ำ ~35% ของ base เพื่อให้ทุกคนถึงเส้นเสมอ */
+        if (!isFinite(v) || v < 0) v = r.base * 0.4;
+        v = Math.max(v, r.base * 0.35);
         r.v = v;
         r.progress += v * dt;
         if (r.progress >= dist) { r.progress = dist; r.finish = S.t; }
@@ -1207,7 +1431,9 @@ const Simulator = ({ students, openProfile }) => {
       if (S.doneAt == null && S.rs.every((r) => r.out || r.finish != null)) S.doneAt = S.t;
       setClock(S.t);
       setRunners([...S.rs]);
-      if (allDone || (S.doneAt != null && S.t - S.doneAt > 24) || S.t > 900) { setPhase("done"); return; }
+            /* timeout เผื่อกรณีผิดปกติ: เวลามาตรฐานของระยะ x4 + กันชน */
+      const maxT = (dist / (r0base)) * 4 + 60;
+      if (allDone || (S.doneAt != null && S.t - S.doneAt > 20) || S.t > maxT) { setPhase("done"); return; }
       rafRef.current = requestAnimationFrame(step);
     };
     rafRef.current = requestAnimationFrame(step);
@@ -1228,7 +1454,7 @@ const Simulator = ({ students, openProfile }) => {
   const statusOf = (r) => {
     if (r.out) return { icon: "💔", text: "ถอนตัวจากการแข่ง", c: "#D06262" };
     if (r.finish != null) return { icon: "🏁", text: `เข้าเส้นชัย ${fmtRaceTime(r.finish)}`, c: "#1E8A65" };
-    if (r.boosting) return { icon: "⚡", text: `ใช้สกิลเร่งความเร็ว! (เหลือ ${r.charges}/5)`, c: "#D9A116" };
+    if (r.boosting) return { icon: "⚡", text: r.skillZone === "home" ? "เร่งสุดตัวเข้าเส้นชัย!" : `ใช้สกิลเร่ง (เหลือ ${r.midCharges}/5)`, c: "#D9A116" };
     if (r.hurt) return { icon: "🩹", text: "เจ็บขา ความเร็วลดลง", c: "#D06262" };
     if (r.blocked && r.focus < 45) return { icon: "😵", text: "สมาธิหลุด หาช่องแซงไม่เจอ", c: "#D06262" };
     if (r.blocked) return { icon: "⛔", text: "โดนบังอยู่ กำลังหาทางแซง", c: "#B0813B" };
@@ -1239,6 +1465,8 @@ const Simulator = ({ students, openProfile }) => {
     }
     if (r.movingIn) return { icon: "↘", text: "ตัดเข้าโค้งในเพื่อลดระยะ", c: T.deep };
     if (r.movingOut) return { icon: "↗", text: "ออกไลน์นอกเพื่อแซง", c: T.deep };
+    if (r.effort === "allout") return { icon: "🔥", text: "วิ่งใส่สุดกำลัง ไม่กลัวเจ็บ", c: "#E8842B" };
+    if (r.effort === "saver") return { icon: "🛡", text: "เซฟแรง คุมจังหวะ กันเจ็บ", c: "#1E8A65" };
     return { icon: "🏇", text: "วิ่งตามจังหวะปกติ", c: T.muted };
   };
 
@@ -1256,8 +1484,7 @@ const Simulator = ({ students, openProfile }) => {
       <section>
         <SectionTitle>Simulation Race — เลือกผู้เข้าแข่ง</SectionTitle>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-          <button onClick={randomPick} style={chipBtn(false)}>🎲 สุ่ม 16 คน</button>
-          <button onClick={() => setPicked([])} style={chipBtn(false)}>ล้างที่เลือก</button>
+          <button onClick={randomPick} style={chipBtn(false)}>🎲 Random All</button>
           <select value={dist} onChange={(e) => setDist(Number(e.target.value))} style={{ ...chipBtn(false), padding: "8px 12px" }}>
             {SIM_DISTS.map((d) => <option key={d} value={d}>{d.toLocaleString()} ม.</option>)}
           </select>
@@ -1270,9 +1497,11 @@ const Simulator = ({ students, openProfile }) => {
           <select value={simSpeed} onChange={(e) => setSimSpeed(Number(e.target.value))} style={{ ...chipBtn(false), padding: "8px 12px" }}>
             {[1, 2].map((sp) => <option key={sp} value={sp}>{sp === 1 ? "เรียลไทม์ (x1)" : "ความเร็วจำลอง x2"}</option>)}
           </select>
+          <button onClick={() => setPicked([])} style={chipBtn(false)}>♻️ Reset</button>
         </div>
+        <div style={{ fontSize: 11.5, color: T.muted, marginBottom: 8 }}>เลือกได้เฉพาะนักเรียนที่มีภาพ ({playable.length} คน) · ถ้าเลือกไม่ครบ 16 ระบบจะสุ่มตัวอื่นมาเติมให้</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 8, marginBottom: 18 }}>
-          {students.map((h) => {
+          {playable.map((h) => {
             const k = keyOf(h), on = picked.includes(k);
             return (
               <button key={k} onClick={() => toggle(k)} style={{
@@ -1306,6 +1535,24 @@ const Simulator = ({ students, openProfile }) => {
   const boardRaise = leadR
     ? pointOf(startS + mu(Math.min(leadR.progress, dist) + (leadR.overrun || 0)), RB).y > CYa
     : false;
+  /* ===== กล้องติดตามผู้นำช่วง 400 ม.สุดท้าย ===== */
+  const leadRemain = leadR ? dist - leadR.progress : 9999;
+  const camActive = followCam && phase === "running" && leadR && leadRemain <= 400 && leadR.finish == null;
+  let cam = { scale: 1, x: 50, y: 50 }; /* x,y เป็น % ของจุดที่อยากให้อยู่กลางจอ */
+  if (camActive) {
+    const lp = pointOf(startS + mu(Math.min(leadR.progress, dist) + (leadR.overrun || 0)), railR(leadR.off));
+    const zoom = 2.1; /* ระดับซูม */
+    /* ease-in ซูมช่วง 400→320 ม. เพื่อไม่ให้กระตุก */
+    const t = Math.min(1, (400 - leadRemain) / 80);
+    cam = { scale: 1 + (zoom - 1) * t, x: lp.x / 10, y: lp.y / 4.4 };
+  }
+  /* transform-origin ที่จุดผู้นำ แล้ว scale — ทำให้ซูมเข้าหาผู้นำพอดี */
+  const worldStyle = {
+    position: "absolute", inset: 0,
+    transformOrigin: `${cam.x}% ${cam.y}%`,
+    transform: `scale(${cam.scale})`,
+    transition: "transform 0.4s ease-out",
+  };
   const wIcon = env ? (env.weather === "rain" ? "🌧" : "☀️") : "";
   const tempTxt = env ? (env.temp === "hot" ? "🔥 อากาศร้อน" : "❄️ อากาศเย็น") : "";
 
@@ -1315,9 +1562,14 @@ const Simulator = ({ students, openProfile }) => {
         <SectionTitle>Simulation Race · {dist.toLocaleString()} ม.</SectionTitle>
         <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700, color: T.deep, fontSize: 14 }}>⏱ {fmtRaceTime(clock)}</span>
         {phase === "running" && (
-          <select value={simSpeed} onChange={(e) => setSimSpeed(Number(e.target.value))} style={{ ...chipBtn(false), padding: "5px 10px", fontSize: 12 }}>
-            {[1, 2].map((sp) => <option key={sp} value={sp}>{sp === 1 ? "เรียลไทม์" : "x2"}</option>)}
-          </select>
+          <>
+            <select value={simSpeed} onChange={(e) => setSimSpeed(Number(e.target.value))} style={{ ...chipBtn(false), padding: "5px 10px", fontSize: 12 }}>
+              {[1, 2].map((sp) => <option key={sp} value={sp}>{sp === 1 ? "เรียลไทม์" : "x2"}</option>)}
+            </select>
+            <button onClick={() => setFollowCam((c) => !c)} style={{
+              ...chipBtn(followCam), padding: "5px 12px", fontSize: 12,
+            }}>{camActive ? "🔍 ตามผู้นำ" : followCam ? "🎥 Follow Cam: ON" : "🎥 Follow Cam: OFF"}</button>
+          </>
         )}
       </div>
       {env && (
@@ -1334,6 +1586,8 @@ const Simulator = ({ students, openProfile }) => {
         background: env && env.weather === "rain" ? "linear-gradient(180deg, #E3E6F2, #EDEAF8)" : "linear-gradient(180deg, #EAF6FD, #F3F0FB)",
         borderRadius: 18, boxShadow: T.shadow, overflow: "hidden",
       }}>
+        {/* world layer: ซูม/แพนตามผู้นำช่วงท้าย */}
+        <div style={worldStyle}>
         <svg viewBox="0 0 1000 440" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
           {/* outer track band (capsule) */}
           <rect x={CXa - HS - ROUT} y={CYa - ROUT} width={2 * HS + 2 * ROUT} height={2 * ROUT} rx={ROUT}
@@ -1372,6 +1626,9 @@ const Simulator = ({ students, openProfile }) => {
         )}
         <div style={{ position: "absolute", left: `${FINX / 10}%`, top: `${(CYa + ROUT) / 4.4}%`, transform: "translate(-50%, -8%)", fontFamily: "'Prompt',sans-serif", fontWeight: 800, fontSize: 11, color: "#33335C", textShadow: "0 0 4px #fff" }}>FINISH</div>
 
+        </div>
+        {/* /world (ปิดส่วนสนาม ไม่รวมกระดาน) */}
+
         {/* กระดานอันดับสด Top 5 — วางแนวนอนกลางเกาะสนาม ไม่บังตัววิ่งในโค้ง · ที่ 1 ซ้ายสุดและเลเยอร์บนสุด */}
         <div style={{
           position: "absolute", left: "50%", top: boardRaise ? `${((CYa - RIN) / 4.4)}%` : "50%",
@@ -1404,6 +1661,8 @@ const Simulator = ({ students, openProfile }) => {
           })}
         </div>
 
+        {/* world (runners) */}
+        <div style={worldStyle}>
         {/* runners */}
         {runners.map((r) => {
           const rr = railR(r.off);
@@ -1440,13 +1699,16 @@ const Simulator = ({ students, openProfile }) => {
                     textShadow: "0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff",
                   }}>{nameOf(r)}</span>
                 </div>
-                <Avatar name={nameOf(r)} sex={r.h.sex} photo={photoOf(r.h)} size={26} />
+                <StaminaRing size={26} stam={!r.out && r.finish == null ? (r.stamPct != null ? r.stamPct : 1) : null}><Avatar name={nameOf(r)} sex={r.h.sex} photo={photoOf(r.h)} size={26} /></StaminaRing>
                 {r.hurt && !r.out && <span style={{ position: "absolute", bottom: -6, right: -8, fontSize: 11 }}>🩹</span>}
                 {r.out && <span style={{ position: "absolute", bottom: -6, right: -8, fontSize: 11 }}>💔</span>}
               </div>
             </div>
           );
         })}
+
+        </div>
+        {/* /world (runners) */}
 
         {/* countdown overlay */}
         {phase === "countdown" && (
@@ -1490,12 +1752,14 @@ const Simulator = ({ students, openProfile }) => {
                 background: raceOver && i === 0 && !r.out ? "#FFF9E6" : i % 2 ? T.soft : "transparent", opacity: r.out ? 0.65 : 1,
               }}>
                 <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700, fontSize: 10.5, color: r.out ? "#D06262" : i === 0 ? "#D9A116" : T.muted, minWidth: 18, textAlign: "right" }}>{r.out ? "✕" : i + 1}</span>
-                <Cloth n={r.no} size={16} />
-                <button onClick={() => openProfile(r.h)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "'Prompt',sans-serif", fontWeight: 700, fontSize: 11.5, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 86, textAlign: "left" }}>
+                <StaminaRing size={22} stam={!r.out && r.finish == null ? (r.stamPct != null ? r.stamPct : 1) : null}>
+                  <Avatar name={nameOf(r)} sex={r.h.sex} photo={photoOf(r.h)} size={22} />
+                </StaminaRing>
+                <button onClick={() => openProfile(r.h)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "'Prompt',sans-serif", fontWeight: 700, fontSize: 11.5, color: T.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 80, textAlign: "left" }}>
                   {nameOf(r)}
                 </button>
                 <span style={{ color: st.c, fontWeight: 600, fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>{st.icon} {st.text}</span>
-                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700, fontSize: 10, color: r.out ? "#D06262" : r.finish != null ? T.deep : T.muted, whiteSpace: "nowrap" }}>
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontWeight: 700, fontSize: 10, color: r.out ? "#D06262" : r.finish != null ? T.deep : T.muted, whiteSpace: "nowrap", minWidth: 34, textAlign: "right" }}>
                   {r.out ? "ถอน" : r.finish != null ? fmtRaceTime(r.finish) : `${Math.round(r.progress)}ม.`}
                 </span>
               </div>
